@@ -1,0 +1,58 @@
+name: Mover archivos (mv)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Ruta de origen (relativa al repo)"
+        required: true
+        type: string
+      destination:
+        description: "Ruta de destino (relativa al repo)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mv
+  cancel-in-progress: false
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar rutas
+        env:
+          SRC: ${{ inputs.source }}
+          DST: ${{ inputs.destination }}
+        run: |
+          for p in "$SRC" "$DST"; do
+            case "$p" in
+              /*|*..*|.git*|.github*) echo "Ruta no permitida: $p"; exit 1 ;;
+            esac
+          done
+          [ -e "$SRC" ] || { echo "No existe el origen: $SRC"; exit 1; }
+
+      - name: Ejecutar mv
+        env:
+          SRC: ${{ inputs.source }}
+          DST: ${{ inputs.destination }}
+        run: |
+          mkdir -p "$(dirname "$DST")"
+          mv -- "$SRC" "$DST"
+          git status --short
+
+      - name: Commit y push
+        env:
+          SRC: ${{ inputs.source }}
+          DST: ${{ inputs.destination }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "mv: $SRC -> $DST"
+          git push
