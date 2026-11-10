@@ -1,0 +1,50 @@
+name: Terminal web
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutos que se mantiene abierta la terminal (máx. 120)"
+        required: false
+        default: "30"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  terminal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 125
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar ttyd y cloudflared
+        run: |
+          curl -fsSL -o ttyd https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
+          curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x ttyd cloudflared
+
+      - name: Abrir terminal
+        env:
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          case "$MINUTES" in ''|*[!0-9]*) MINUTES=30 ;; esac
+          [ "$MINUTES" -gt 120 ] && MINUTES=120
+          [ "$MINUTES" -lt 1 ] && MINUTES=1
+
+          PASS=$(openssl rand -hex 12)
+          ./ttyd -W -p 7681 -c "runner:$PASS" bash &
+          ./cloudflared tunnel --url http://localhost:7681 --no-autoupdate > cf.log 2>&1 &
+
+          URL=""
+          for i in $(seq 1 30); do
+            URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' cf.log | head -1 || true)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
+          if [ -z "$URL" ]; then cat cf.log; echo "No se pudo abrir el túnel"; exit 1; fi
+
+          echo "::notice title=TERMINAL::TERMINAL_URL=$URL USER=runner PASS=$PASS"
+          echo "Terminal abierta durante $MINUTES minutos: $URL (usuario: runner, contraseña: $PASS)"
+          sleep $((MINUTES * 60))
